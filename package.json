@@ -1,0 +1,22 @@
+{
+  "name": "paperclip-ghost",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "worker": "node dist/worker.js",
+    "start": "node dist/start.js",
+    "status": "node dist/start.js --status"
+  },
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@temporalio/activity": "^1.25.0",
+    "@temporalio/client": "^1.25.0",
+    "@temporalio/worker": "^1.25.0",
+    "@temporalio/workflow": "^1.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
