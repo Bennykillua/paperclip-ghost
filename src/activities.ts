@@ -56,6 +56,7 @@ const frontWindowScript = [
 async function logged<T>(name: string, work: () => Promise<T>, timed = false): Promise<T> {
   const { attempt } = Context.current().info;
   if (attempt > 1) console.log(`[retry] ${name}: attempt ${attempt}`);
+  if (timed) console.log(`[start] ${name}: attempt ${attempt}`);
   const start = performance.now();
   try {
     const result = await work();

@@ -5,7 +5,9 @@
     "build": "tsc",
     "worker": "node dist/worker.js",
     "start": "node dist/start.js",
-    "status": "node dist/start.js --status"
+    "status": "node dist/start.js --status",
+    "install-worker": "npm run build && node scripts/launchd.mjs install",
+    "uninstall-worker": "node scripts/launchd.mjs uninstall"
   },
   "type": "module",
   "private": "true",
