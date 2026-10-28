@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { Context } from '@temporalio/activity';
+import { Sentry, traced, type TraceAttributes } from './telemetry.js';
 import type { Decision, NotableKind, Vision, WindowInfo } from './shared.js';
 
 const run = promisify(execFile);
@@ -52,25 +53,41 @@ const frontWindowScript = [
   'end tell',
 ].join('\n');
 
-// Logs every failed attempt and every retry. Timings are logged for the slow steps only.
-async function logged<T>(name: string, work: () => Promise<T>, timed = false): Promise<T> {
+interface LogOptions {
+  timed?: boolean;
+  spanName?: string;
+  op?: string;
+}
+
+// Runs one step as a span in the glance trace. Logs every failed attempt and every retry.
+// Timings are logged for the slow steps only.
+async function logged<T>(
+  name: string,
+  sentryTrace: string,
+  attributes: TraceAttributes,
+  work: (span: Sentry.Span) => Promise<T>,
+  { timed = false, spanName = name, op }: LogOptions = {},
+): Promise<T> {
   const { attempt } = Context.current().info;
   if (attempt > 1) console.log(`[retry] ${name}: attempt ${attempt}`);
   if (timed) console.log(`[start] ${name}: attempt ${attempt}`);
   const start = performance.now();
-  try {
-    const result = await work();
-    if (timed) console.log(`[timing] ${name} ${Math.round(performance.now() - start)}ms`);
-    return result;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    console.log(`[fail] ${name}: attempt ${attempt} failed: ${reason}`);
-    throw error;
-  }
+  return traced(sentryTrace, spanName, { ...attributes, 'paperclip.attempt': String(attempt) }, async (span) => {
+    try {
+      const result = await work(span);
+      if (timed) console.log(`[timing] ${name} ${Math.round(performance.now() - start)}ms`);
+      return result;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.log(`[fail] ${name}: attempt ${attempt} failed: ${reason}`);
+      span.setAttribute('paperclip.attempt', String(attempt));
+      throw error;
+    }
+  }, op);
 }
 
-export async function readActiveWindow(): Promise<WindowInfo> {
-  return logged('window read', async () => {
+export async function readActiveWindow(sentryTrace: string): Promise<WindowInfo> {
+  return logged('window read', sentryTrace, {}, async () => {
     const { stdout } = await run('osascript', ['-e', frontWindowScript]);
     const [app = '', ...titleLines] = stdout.trim().split('\n');
     return { app, title: titleLines.join('\n') };
@@ -78,17 +95,24 @@ export async function readActiveWindow(): Promise<WindowInfo> {
 }
 
 // Returns a file path, not image bytes: a 1280px screenshot is far too big to store in workflow history.
-export async function captureScreen(): Promise<string> {
-  return logged('screenshot', async () => {
+export async function captureScreen(sentryTrace: string): Promise<string> {
+  return logged('screenshot', sentryTrace, {}, async () => {
     await mkdir(screenDir, { recursive: true });
     await run('screencapture', ['-x', rawPath]);
-    await run('sips', ['-Z', String(maxImageSide), rawPath, '--out', resizedPath]);
+    await Sentry.startSpan({ name: 'resize' }, () => run('sips', ['-Z', String(maxImageSide), rawPath, '--out', resizedPath]));
     return resizedPath;
-  }, true);
+  }, { timed: true });
 }
 
-export async function describeScreen(imagePath: string): Promise<Vision> {
-  return logged('vision call', async () => {
+interface OllamaResponse {
+  response: string;
+  model?: string;
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+export async function describeScreen(imagePath: string, sentryTrace: string): Promise<Vision> {
+  return logged('vision', sentryTrace, {}, async (span) => {
     const image = (await readFile(imagePath)).toString('base64');
     const response = await fetch(`${ollamaUrl}/api/generate`, {
       method: 'POST',
@@ -107,9 +131,27 @@ export async function describeScreen(imagePath: string): Promise<Vision> {
     if (!response.ok) {
       throw new Error(`${visionModel} request failed: ${response.status} ${await response.text()}`);
     }
-    const { response: text } = await response.json() as { response: string };
-    return JSON.parse(text) as Vision;
-  }, true);
+    const body = await response.json() as OllamaResponse;
+    const vision = JSON.parse(body.response) as Vision;
+    if (!vision.notable) vision.notable_kind = null;
+
+    // Sentry gen_ai conventions, see docs.sentry.io/product/agents/costs. Token counts come from Ollama.
+    // Prompts, responses and images are never set on the span.
+    const inputTokens = body.prompt_eval_count ?? 0;
+    const outputTokens = body.eval_count ?? 0;
+    span.setAttributes({
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': visionModel,
+      'gen_ai.response.model': body.model ?? visionModel,
+      'gen_ai.provider.name': 'ollama',
+      'gen_ai.usage.input_tokens': inputTokens,
+      'gen_ai.usage.output_tokens': outputTokens,
+      'gen_ai.usage.total_tokens': inputTokens + outputTokens,
+      'gen_ai.cost.total_tokens': 0, // local model, no cost
+      notable_kind: vision.notable_kind ?? 'none',
+    });
+    return vision;
+  }, { timed: true, spanName: `chat ${visionModel}`, op: 'gen_ai.chat' });
 }
 
 export interface DecideInput {
@@ -120,10 +162,12 @@ export interface DecideInput {
   errorMinutes: number;
   notable: string | null;
   notableKind: NotableKind | null;
+  sentryTrace: string;
 }
 
 export async function decide(input: DecideInput): Promise<Decision> {
-  return logged('decide', async () => {
+  const attributes = { notable_kind: input.notableKind ?? 'none' };
+  return logged('decide', input.sentryTrace, attributes, async () => {
     const stuck = Math.max(input.windowMinutes, input.errorMinutes) >= stuckMinutes;
     if (stuck) {
       const why = input.errorMinutes >= input.windowMinutes && input.notable

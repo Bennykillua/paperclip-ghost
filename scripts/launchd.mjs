@@ -21,6 +21,7 @@ function plist() {
   <key>ProgramArguments</key>
   <array>
     <string>${process.execPath}</string>
+    <string>--env-file-if-exists=${join(projectDir, '.env')}</string>
     <string>${join(projectDir, 'dist', 'worker.js')}</string>
   </array>
   <key>WorkingDirectory</key>

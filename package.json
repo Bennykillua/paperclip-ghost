@@ -12,6 +12,7 @@
   "type": "module",
   "private": "true",
   "dependencies": {
+    "@sentry/node": "^11.9.0",
     "@temporalio/activity": "^1.25.0",
     "@temporalio/client": "^1.25.0",
     "@temporalio/worker": "^1.25.0",

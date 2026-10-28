@@ -1,4 +1,4 @@
-import { ActivityFailure, continueAsNew, defineQuery, log, proxyActivities, setHandler, sleep } from '@temporalio/workflow';
+import { ActivityFailure, continueAsNew, defineQuery, log, proxyActivities, setHandler, sleep, uuid4 } from '@temporalio/workflow';
 import type * as activities from './activities.js';
 import type { GlanceInput, Observation, StatusReport } from './shared.js';
 
@@ -44,6 +44,13 @@ function problemKey(observation: Observation): string | null {
   return vision?.notable && vision.notable_kind ? `${vision.notable_kind}\u0000${observation.title}` : null;
 }
 
+// One sentry-trace header per glance. uuid4 is deterministic inside workflows, so replays get the same ids.
+function newSentryTrace(): string {
+  const traceId = uuid4().replaceAll('-', '');
+  const spanId = uuid4().replaceAll('-', '').slice(0, 16);
+  return `${traceId}-${spanId}-1`;
+}
+
 function errorMessage(error: unknown): string {
   const cause = error instanceof ActivityFailure ? error.cause : error;
   return cause instanceof Error ? cause.message : String(cause);
@@ -82,15 +89,16 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
       });
     }
 
+    const sentryTrace = newSentryTrace();
     try {
-      const window = await readActiveWindow();
+      const window = await readActiveWindow(sentryTrace);
       const key = `${window.app}\u0000${window.title}`;
 
       if (key !== lastKey || tickAt - lastVisionAt >= visionEveryMs) {
         const reason = key !== lastKey ? 'window changed' : 'every 45s';
         lastVisionAt = tickAt;
         try {
-          latestVision = await describeScreen(await captureScreen());
+          latestVision = await describeScreen(await captureScreen(sentryTrace), sentryTrace);
           const notable = latestVision.notable ? ` Notable (${latestVision.notable_kind}): ${latestVision.notable}` : '';
           log.info(`vision (${reason}): ${latestVision.app}, ${latestVision.activity}. ${latestVision.detail}${notable}`);
         } catch (error) {
@@ -111,6 +119,7 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
         errorMinutes: streakMinutes(memory, problemKey),
         notable: latestVision?.notable ?? null,
         notableKind: latestVision?.notable_kind ?? null,
+        sentryTrace,
       });
       if (decision.kind !== lastDecision?.kind) {
         log.info(`${decision.kind.toUpperCase()}${decision.message ? ` ${decision.message}` : ''}`);
