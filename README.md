@@ -10,13 +10,27 @@ A desktop ghost for macOS that watches what you're doing and butts in. It runs a
 
 Setup installs the Temporal CLI and Ollama if they're missing, with your permission.
 
-## Set up
+## Install and use
+
+Four steps. Setup does the rest.
 
 ```sh
-git clone <this repo>
+git clone https://github.com/Bennykillua/paperclip-ghost.git
 cd paperclip-ghost
-npm run setup
+npm run setup              # checks the tools, asks for a model, builds, starts the agents
+npm run ghost:test -- all  # see every effect once
 ```
+
+Then give macOS the two permissions in [Permissions](#permissions) and run `npm run ghost:start`. The ghost starts on login and comes back if it is killed.
+
+Setup does these steps, asking before each download:
+
+1. Checks macOS and Node 20 or newer.
+2. Installs the Temporal CLI and Ollama with Homebrew, if they are missing and you say yes.
+3. Asks which vision model to use, and downloads it only if it is not already on your Mac.
+4. Builds the project and installs three background agents: Temporal, the worker and the ghost window.
+
+To remove everything, run `npm run ghost:stop`, then `node scripts/launchd.mjs uninstall`, then delete the folder.
 
 Setup asks which vision model to use:
 
