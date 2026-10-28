@@ -61,11 +61,36 @@ function launchctl(...args) {
   return execFileSync('launchctl', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+function isLoaded(label) {
+  try {
+    launchctl('print', `${domain}/${label}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// bootout returns before launchd has finished stopping the job. Bootstrapping during that window fails with I/O error 5.
 function unload(label) {
   try {
     launchctl('bootout', `${domain}/${label}`);
   } catch {
     // Not loaded, which is fine.
+  }
+  for (let wait = 0; wait < 10 && isLoaded(label); wait += 1) {
+    execFileSync('sleep', ['1']);
+  }
+}
+
+function bootstrap(label) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      launchctl('bootstrap', domain, plistPath(label));
+      return;
+    } catch (error) {
+      if (attempt >= 5) throw error;
+      execFileSync('sleep', ['1']);
+    }
   }
 }
 
@@ -77,7 +102,7 @@ if (command === 'install') {
   for (const agent of agents) {
     await writeFile(plistPath(agent.label), plist(agent));
     unload(agent.label);
-    launchctl('bootstrap', domain, plistPath(agent.label));
+    bootstrap(agent.label);
     console.log(`Installed ${agent.label}. Logs: ${agent.log}`);
   }
 } else if (command === 'uninstall') {
@@ -98,7 +123,7 @@ if (command === 'install') {
       process.exit(1);
     }
     unload(agent.label);
-    launchctl('bootstrap', domain, plistPath(agent.label));
+    bootstrap(agent.label);
     console.log(`Started ${agent.label}.`);
   }
 } else {

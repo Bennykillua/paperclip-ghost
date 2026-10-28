@@ -44,7 +44,8 @@ export interface GlanceInput {
   latestVision: Vision | null;
   lastDecision: Decision | null;
   lastShownAt?: number;
-  lastShownKind?: 'help' | 'haunt' | null;
+  lastShownKind?: 'help' | 'haunt' | 'suggest' | null;
+  lastSuggestAt?: number;
 }
 
 export interface StatusReport {

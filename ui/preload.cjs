@@ -5,6 +5,6 @@ contextBridge.exposeInMainWorld('paperclip', {
   onCursor: (callback) => ipcRenderer.on('cursor', (_event, point) => callback(point)),
   onMode: (callback) => ipcRenderer.on('mode', (_event, mode) => callback(mode)),
   onMessage: (callback) => ipcRenderer.on('message', (_event, message) => callback(message)),
+  onDemo: (callback) => ipcRenderer.on('demo', (_event, demo) => callback(demo)),
   setHover: (over) => ipcRenderer.send('hover', over),
-  drag: (dx, dy) => ipcRenderer.send('drag', { dx, dy }),
 });

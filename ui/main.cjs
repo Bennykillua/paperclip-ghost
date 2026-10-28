@@ -7,23 +7,28 @@ const zlib = require('node:zlib');
 // Screenshot mode: PAPERCLIP_SNAPSHOT=<file.png> renders the window on white, saves only the window, and quits.
 const snapshotPath = process.env.PAPERCLIP_SNAPSHOT;
 
+// Thunder is synthesized with Web Audio, and the demo should play without a click.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 // Must match src/shared.ts.
 const uiPort = 47831;
 const temporalAddress = '127.0.0.1:7233';
 const workflowId = 'paperclip-glance';
 const askSignal = 'askGhost';
 
-const windowWidth = 300;
-const windowHeight = 340;
 const cursorMs = 50;
 const modeMs = 60_000;
 const cooldownMs = 3 * 60_000;
+// "Ask the ghost" steps through each effect in turn. Lightning is only shown in possessed mode.
+const demoSteps = ['line', 'suggest', 'flee', 'splatter', 'lightning'];
 
 let win = null;
 let tray = null;
 let manualPossessed = null; // null means automatic: possessed between midnight and 5am
+let lightningOn = true;
 let lastHour = new Date().getHours();
 let lastShownAt = 0;
+let demoIndex = 0;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -38,24 +43,18 @@ function liveWindow() {
 }
 
 function sendMode() {
-  liveWindow()?.webContents.send('mode', { possessed: isPossessed() });
+  liveWindow()?.webContents.send('mode', { possessed: isPossessed(), lightning: lightningOn });
   rebuildMenu();
 }
 
-function placeBottomRight() {
-  const workArea = screen.getPrimaryDisplay().workArea;
-  win.setBounds({
-    x: workArea.x + workArea.width - windowWidth - 16,
-    y: workArea.y + workArea.height - windowHeight - 16,
-    width: windowWidth,
-    height: windowHeight,
-  });
-}
-
+// The window covers the whole display and is click-through, so the ghost can move anywhere.
 function createWindow() {
+  const display = screen.getPrimaryDisplay().bounds;
   win = new BrowserWindow({
-    width: windowWidth,
-    height: windowHeight,
+    x: display.x,
+    y: display.y,
+    width: display.width,
+    height: display.height,
     frame: false,
     transparent: !snapshotPath,
     backgroundColor: snapshotPath ? '#FFFFFF' : undefined,
@@ -73,9 +72,10 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // Clicks pass through the window. The renderer switches this off while the pointer is over the ghost or bubble.
   win.setIgnoreMouseEvents(true, { forward: true });
-  placeBottomRight();
   win.loadFile(path.join(__dirname, 'index.html'));
   win.webContents.on('did-finish-load', sendMode);
+  // Errors from the renderer show up in the UI log, so effects that fail are visible in the terminal.
+  win.webContents.on('console-message', (_event, _level, message) => console.log(`[renderer] ${message}`));
   win.on('closed', () => {
     win = null;
   });
@@ -88,15 +88,31 @@ function createWindow() {
   }
 }
 
-// Asks the worker to show an interruption on its next glance.
-async function askGhost() {
+// Asks the worker for an interruption on its next glance. The mode is 'line' or 'suggest'.
+async function askGhost(mode) {
   const { Client, Connection } = await import('@temporalio/client');
   const connection = await Connection.connect({ address: temporalAddress });
   try {
-    await new Client({ connection }).workflow.getHandle(workflowId).signal(askSignal);
-    console.log('[ask] signal sent');
+    await new Client({ connection }).workflow.getHandle(workflowId).signal(askSignal, mode);
+    console.log(`[ask] ${mode} signal sent`);
   } finally {
     await connection.close();
+  }
+}
+
+// Each press of "Ask the ghost" shows the next effect. Worker effects go through the worker, the rest run in the window.
+function askDemo() {
+  for (let tries = 0; tries < demoSteps.length; tries += 1) {
+    const step = demoSteps[demoIndex % demoSteps.length];
+    demoIndex += 1;
+    if (step === 'lightning' && !isPossessed()) continue;
+    if (step === 'line' || step === 'suggest') {
+      askGhost(step).catch((error) => console.error(`[ask] failed: ${error.message}`));
+    } else {
+      liveWindow()?.webContents.send('demo', { effect: step });
+    }
+    console.log(`[ask] demo: ${step}`);
+    return;
   }
 }
 
@@ -160,8 +176,17 @@ function rebuildMenu() {
       },
     },
     {
+      label: 'Lightning',
+      type: 'checkbox',
+      checked: lightningOn,
+      click: () => {
+        lightningOn = !lightningOn;
+        sendMode();
+      },
+    },
+    {
       label: 'Ask the ghost',
-      click: () => askGhost().catch((error) => console.error(`[ask] failed: ${error.message}`)),
+      click: askDemo,
     },
   ]));
 }
@@ -172,7 +197,7 @@ function createTray() {
   rebuildMenu();
 }
 
-// Messages from the worker's show step: one JSON object per line.
+// Messages from the worker's show step, and demo messages: one JSON object per line.
 function startMessageServer() {
   const server = net.createServer((socket) => {
     let buffered = '';
@@ -199,6 +224,10 @@ function deliver(line) {
     console.log('[ui] dropped a malformed message');
     return;
   }
+  if (message.demo) {
+    liveWindow()?.webContents.send('demo', { effect: message.demo });
+    return;
+  }
   const now = Date.now();
   // Explicit "Ask the ghost" requests bypass the cooldown.
   if (!message.forced && now - lastShownAt < cooldownMs) {
@@ -206,18 +235,12 @@ function deliver(line) {
     return;
   }
   lastShownAt = now;
+  console.log(`[ui] ${message.kind}: ${message.text}`);
   liveWindow()?.webContents.send('message', { text: message.text, kind: message.kind });
 }
 
 ipcMain.on('hover', (_event, over) => {
   liveWindow()?.setIgnoreMouseEvents(!over, { forward: true });
-});
-
-ipcMain.on('drag', (_event, { dx, dy }) => {
-  const target = liveWindow();
-  if (!target) return;
-  const bounds = target.getBounds();
-  target.setPosition(Math.round(bounds.x + dx), Math.round(bounds.y + dy));
 });
 
 app.whenReady().then(() => {
@@ -230,8 +253,8 @@ app.whenReady().then(() => {
     const target = liveWindow();
     if (!target) return;
     const point = screen.getCursorScreenPoint();
-    const bounds = target.getBounds();
-    target.webContents.send('cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
+    const origin = target.getBounds();
+    target.webContents.send('cursor', { x: point.x - origin.x, y: point.y - origin.y });
   }, cursorMs);
 
   // Possessed mode follows the clock. A manual toggle lasts until the next midnight or 5am boundary.

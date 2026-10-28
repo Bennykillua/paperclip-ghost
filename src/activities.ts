@@ -195,9 +195,12 @@ export async function decide(input: DecideInput): Promise<Decision> {
   });
 }
 
+export type ShowKind = 'help' | 'haunt' | 'suggest';
+
 export interface ShowInput {
-  kind: 'help' | 'haunt';
+  kind: ShowKind;
   observation: Vision | null;
+  title: string;
   sentryTrace: string;
   forced: boolean;
 }
@@ -206,25 +209,37 @@ const lineModel = 'gemma4:e2b';
 const lineTimeoutMs = 5_000;
 const maxLineWords = 14;
 
-// Used when the model call fails, times out or returns something unusable.
-function templateLine(kind: 'help' | 'haunt', observation: Vision | null): string {
-  const app = observation?.app || 'your app';
+// Used when the model call fails, times out, or returns a line that does not name the observed app, page or activity.
+function templateLine(kind: ShowKind, observation: Vision | null): string {
+  const app = observation?.app || 'this app';
   if (kind === 'haunt') return `It's late, and ${app} is still open. Nobody should be awake for this.`;
-  if (observation?.notable && observation.notable_kind) {
-    return `That ${observation.notable_kind} in ${app} looks stuck. Try the smallest fix first.`;
+  if (kind === 'suggest' && observation?.notable) {
+    return `${observation.notable_kind ?? 'Notable'} in ${app}: want the one fix to try first?`;
   }
-  return `Stuck on ${app}? Try the smallest next step.`;
+  const activity = (observation?.activity ?? 'Stuck').replace(/\.$/, '');
+  return `${activity} in ${app}? Want the next small step?`;
+}
+
+// A line must name at least one word from the app, window title or activity it was written about.
+function namesObservation(line: string, observation: Vision | null, title: string): boolean {
+  if (!observation) return true;
+  const words = `${observation.app} ${title} ${observation.activity} ${observation.detail}`.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+  const lower = line.toLowerCase();
+  return words.some((word) => lower.includes(word));
 }
 
 // Text only, think off. The span records token counts and never the prompt or the line.
-async function modelLine(kind: 'help' | 'haunt', observation: Vision | null): Promise<string> {
+async function modelLine(kind: ShowKind, observation: Vision | null, title: string): Promise<string> {
   const described = observation
-    ? `app ${observation.app}; activity ${observation.activity}; detail ${observation.detail}; notable ${observation.notable ?? 'nothing'}.`
-    : 'nothing observed yet.';
-  const instruction = kind === 'help'
-    ? 'Give one genuinely useful next step for what the person is doing. Use only what is described.'
-    : 'Be eerie and quiet, never gory. Remind them it is late.';
-  const prompt = `You are a bedsheet ghost that pops up on a Mac to interrupt someone. Write one line, under 15 words, in character. ${instruction} What is on screen: ${described} Reply with the line only.`;
+    ? `App: ${observation.app}. Window: ${title || 'untitled'}. Activity: ${observation.activity}. Detail: ${observation.detail}. Notable: ${observation.notable ?? 'nothing'}.`
+    : 'Nothing has been observed yet.';
+  const task = kind === 'help'
+    ? 'Give one genuinely useful next step for the exact thing on screen.'
+    : kind === 'suggest'
+      ? 'Suggest one concrete action for the notable item on screen.'
+      : 'Be eerie and quiet about what they are doing this late at night. Never gory.';
+  const tone = 'Examples of the tone, do not copy them: "Booking a one-way flight at 2am? What are you running from?" and "Third error in a row? Paste the first line into a search."';
+  const prompt = `You are a bedsheet ghost that pops up on a Mac to interrupt someone. Write ONE line, under 15 words, in character. It must name the specific app, page or activity from the description. ${task} No gore. ${tone} Description: ${described} Reply with the line only.`;
 
   return Sentry.startSpan({ name: `chat ${lineModel}`, op: 'gen_ai.chat' }, async (span) => {
     const response = await fetch(`${ollamaUrl}/api/generate`, {
@@ -257,6 +272,7 @@ async function modelLine(kind: 'help' | 'haunt', observation: Vision | null): Pr
 
     const line = body.response.trim().split('\n')[0].replace(/^["']|["']$/g, '').trim();
     if (!line || line.split(/\s+/).length > maxLineWords) throw new Error('model line was empty or too long');
+    if (!namesObservation(line, observation, title)) throw new Error(`model line did not name the observed app, page or activity: "${line}"`);
     return line;
   });
 }
@@ -274,7 +290,7 @@ export async function showInterruption(input: ShowInput): Promise<void> {
   return logged('show', input.sentryTrace, { 'paperclip.kind': input.kind }, async (span) => {
     let text: string;
     try {
-      text = await modelLine(input.kind, input.observation);
+      text = await modelLine(input.kind, input.observation, input.title);
       span.setAttribute('paperclip.line_source', 'model');
     } catch (error) {
       text = templateLine(input.kind, input.observation);
