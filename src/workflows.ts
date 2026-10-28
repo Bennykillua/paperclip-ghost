@@ -1,4 +1,4 @@
-import { ActivityFailure, continueAsNew, defineQuery, log, proxyActivities, setHandler, sleep, uuid4 } from '@temporalio/workflow';
+import { ActivityFailure, continueAsNew, defineQuery, log, patched, proxyActivities, setHandler, sleep, uuid4 } from '@temporalio/workflow';
 import type * as activities from './activities.js';
 import type { GlanceInput, Observation, StatusReport } from './shared.js';
 
@@ -21,6 +21,10 @@ const { describeScreen } = proxyActivities<typeof activities>({
 });
 const { decide } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10s',
+  retry: { maximumAttempts: 3, initialInterval: '1s' },
+});
+const { beginGlance, endGlance } = proxyActivities<typeof activities>({
+  startToCloseTimeout: '5s',
   retry: { maximumAttempts: 3, initialInterval: '1s' },
 });
 
@@ -90,7 +94,10 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
     }
 
     const sentryTrace = newSentryTrace();
+    // patched() keeps histories recorded before the glance span existed on the old path during replay.
+    const glanceSpan = patched('invoke-agent-span');
     try {
+      if (glanceSpan) await beginGlance(sentryTrace);
       const window = await readActiveWindow(sentryTrace);
       const key = `${window.app}\u0000${window.title}`;
 
@@ -127,6 +134,10 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
       lastDecision = decision;
     } catch (error) {
       log.warn(`tick failed: ${errorMessage(error)}`);
+    }
+    // Runs even after a failed tick, so the glance span is always closed.
+    if (glanceSpan) {
+      await endGlance(sentryTrace).catch((error) => log.warn(`closing glance span failed: ${errorMessage(error)}`));
     }
 
     await sleep(tickMs);

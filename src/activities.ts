@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { Context } from '@temporalio/activity';
-import { Sentry, traced, type TraceAttributes } from './telemetry.js';
+import { closeGlance, openGlance, Sentry, traced, type TraceAttributes } from './telemetry.js';
 import type { Decision, NotableKind, Vision, WindowInfo } from './shared.js';
 
 const run = promisify(execFile);
@@ -84,6 +84,14 @@ async function logged<T>(
       throw error;
     }
   }, op);
+}
+
+export async function beginGlance(sentryTrace: string): Promise<void> {
+  openGlance(sentryTrace);
+}
+
+export async function endGlance(sentryTrace: string): Promise<void> {
+  closeGlance(sentryTrace);
 }
 
 export async function readActiveWindow(sentryTrace: string): Promise<WindowInfo> {

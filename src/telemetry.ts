@@ -56,6 +56,31 @@ export type TraceAttributes = Record<string, string | number>;
 
 // Runs work inside a span that belongs to the glance trace identified by sentryTrace.
 // The workflow creates that header once per glance, so all of a glance's steps share one trace id.
+// Open glance spans, keyed by trace id. A step that runs in this worker while its glance is open becomes its child.
+const openGlances = new Map<string, Sentry.Span>();
+
+function traceIdOf(sentryTrace: string): string {
+  return sentryTrace.split('-')[0];
+}
+
+// The invoke_agent span for one glance. Steps nest under it until endGlance closes it.
+export function openGlance(sentryTrace: string): void {
+  const span = Sentry.continueTrace({ sentryTrace, baggage: undefined }, () =>
+    Sentry.startInactiveSpan({
+      name: 'paperclip',
+      op: 'gen_ai.invoke_agent',
+      attributes: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'paperclip' },
+    }),
+  );
+  openGlances.set(traceIdOf(sentryTrace), span);
+}
+
+export function closeGlance(sentryTrace: string): void {
+  const key = traceIdOf(sentryTrace);
+  openGlances.get(key)?.end();
+  openGlances.delete(key);
+}
+
 export function traced<T>(
   sentryTrace: string,
   name: string,
@@ -63,8 +88,9 @@ export function traced<T>(
   work: (span: Sentry.Span) => Promise<T>,
   op?: string,
 ): Promise<T> {
+  const parent = openGlances.get(traceIdOf(sentryTrace)) ?? null;
   return Sentry.continueTrace({ sentryTrace, baggage: undefined }, () =>
-    Sentry.startSpan({ name, op, attributes }, (span) => work(span)),
+    Sentry.withActiveSpan(parent, () => Sentry.startSpan({ name, op, attributes }, (span) => work(span))),
   );
 }
 
