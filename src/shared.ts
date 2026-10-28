@@ -1,5 +1,8 @@
 export const taskQueue = 'paperclip-glance';
 export const workflowId = 'paperclip-glance';
+export const askSignalName = 'askGhost';
+// The Electron ghost listens here. Matches ui/main.cjs.
+export const uiPort = 47831;
 // 127.0.0.1 rather than localhost: the CLI and SDK time out resolving localhost to IPv6 here.
 export const temporalAddress = '127.0.0.1:7233';
 
@@ -40,6 +43,8 @@ export interface GlanceInput {
   lastVisionAt: number;
   latestVision: Vision | null;
   lastDecision: Decision | null;
+  lastShownAt?: number;
+  lastShownKind?: 'help' | 'haunt' | null;
 }
 
 export interface StatusReport {

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { connect } from 'node:net';
 import { mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { Context } from '@temporalio/activity';
 import { closeGlance, openGlance, Sentry, traced, type TraceAttributes } from './telemetry.js';
-import type { Decision, NotableKind, Vision, WindowInfo } from './shared.js';
+import { uiPort, type Decision, type NotableKind, type Vision, type WindowInfo } from './shared.js';
 
 const run = promisify(execFile);
 
@@ -191,5 +192,95 @@ export async function decide(input: DecideInput): Promise<Decision> {
     }
 
     return { kind: 'quiet' };
+  });
+}
+
+export interface ShowInput {
+  kind: 'help' | 'haunt';
+  observation: Vision | null;
+  sentryTrace: string;
+  forced: boolean;
+}
+
+const lineModel = 'gemma4:e2b';
+const lineTimeoutMs = 5_000;
+const maxLineWords = 14;
+
+// Used when the model call fails, times out or returns something unusable.
+function templateLine(kind: 'help' | 'haunt', observation: Vision | null): string {
+  const app = observation?.app || 'your app';
+  if (kind === 'haunt') return `It's late, and ${app} is still open. Nobody should be awake for this.`;
+  if (observation?.notable && observation.notable_kind) {
+    return `That ${observation.notable_kind} in ${app} looks stuck. Try the smallest fix first.`;
+  }
+  return `Stuck on ${app}? Try the smallest next step.`;
+}
+
+// Text only, think off. The span records token counts and never the prompt or the line.
+async function modelLine(kind: 'help' | 'haunt', observation: Vision | null): Promise<string> {
+  const described = observation
+    ? `app ${observation.app}; activity ${observation.activity}; detail ${observation.detail}; notable ${observation.notable ?? 'nothing'}.`
+    : 'nothing observed yet.';
+  const instruction = kind === 'help'
+    ? 'Give one genuinely useful next step for what the person is doing. Use only what is described.'
+    : 'Be eerie and quiet, never gory. Remind them it is late.';
+  const prompt = `You are a bedsheet ghost that pops up on a Mac to interrupt someone. Write one line, under 15 words, in character. ${instruction} What is on screen: ${described} Reply with the line only.`;
+
+  return Sentry.startSpan({ name: `chat ${lineModel}`, op: 'gen_ai.chat' }, async (span) => {
+    const response = await fetch(`${ollamaUrl}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: lineModel,
+        prompt,
+        stream: false,
+        think: false,
+        options: { temperature: 0.7, num_predict: 40 },
+      }),
+      signal: AbortSignal.timeout(lineTimeoutMs),
+    });
+    if (!response.ok) throw new Error(`${lineModel} request failed: ${response.status}`);
+    const body = await response.json() as OllamaResponse;
+
+    const inputTokens = body.prompt_eval_count ?? 0;
+    const outputTokens = body.eval_count ?? 0;
+    span.setAttributes({
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': lineModel,
+      'gen_ai.response.model': body.model ?? lineModel,
+      'gen_ai.provider.name': 'ollama',
+      'gen_ai.usage.input_tokens': inputTokens,
+      'gen_ai.usage.output_tokens': outputTokens,
+      'gen_ai.usage.total_tokens': inputTokens + outputTokens,
+      'gen_ai.cost.total_tokens': 0,
+    });
+
+    const line = body.response.trim().split('\n')[0].replace(/^["']|["']$/g, '').trim();
+    if (!line || line.split(/\s+/).length > maxLineWords) throw new Error('model line was empty or too long');
+    return line;
+  });
+}
+
+function sendToGhost(message: { kind: string; text: string; forced: boolean }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: '127.0.0.1', port: uiPort });
+    socket.setTimeout(2_000, () => socket.destroy(new Error('ghost socket timed out')));
+    socket.once('error', reject);
+    socket.end(`${JSON.stringify(message)}\n`, () => resolve());
+  });
+}
+
+export async function showInterruption(input: ShowInput): Promise<void> {
+  return logged('show', input.sentryTrace, { 'paperclip.kind': input.kind }, async (span) => {
+    let text: string;
+    try {
+      text = await modelLine(input.kind, input.observation);
+      span.setAttribute('paperclip.line_source', 'model');
+    } catch (error) {
+      text = templateLine(input.kind, input.observation);
+      span.setAttribute('paperclip.line_source', 'template');
+      console.log(`[show] template line used: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await sendToGhost({ kind: input.kind, text, forced: input.forced });
   });
 }

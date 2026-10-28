@@ -7,7 +7,9 @@
     "start": "node dist/start.js",
     "status": "node dist/start.js --status",
     "install-worker": "npm run build && node scripts/launchd.mjs install",
-    "uninstall-worker": "node scripts/launchd.mjs uninstall"
+    "uninstall-worker": "node scripts/launchd.mjs uninstall",
+    "ghost:stop": "node scripts/launchd.mjs stop",
+    "ghost:start": "node scripts/launchd.mjs start"
   },
   "type": "module",
   "private": "true",
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "electron": "^45.1.0",
     "typescript": "^7.0.2"
   }
 }

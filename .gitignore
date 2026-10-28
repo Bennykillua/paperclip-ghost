@@ -2,3 +2,4 @@ node_modules/
 dist/
 paperclip.db*
 .env
+.temporal-server.log

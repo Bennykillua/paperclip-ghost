@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'">
+<title>Paperclip</title>
+<style>
+  /* Caveat, SIL Open Font License 1.1. Licence in fonts/OFL.txt. Bundled so the UI makes no network requests. */
+  @font-face { font-family: Caveat; src: url('fonts/Caveat-Variable.ttf') format('truetype'); font-weight: 400 700; font-display: block; }
+  /* Colours from the reference design: ink #1C1A17, possessed ink #8E1B14. */
+  :root { --ink: #1C1A17; --sheet: #FFFFFF; --bubble: #FFFFFF; }
+  body.possessed { --ink: #8E1B14; --sheet: #F7EFE6; --bubble: #F7EFE6; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: Caveat, cursive; color: var(--ink); }
+
+  .ghost { position: absolute; right: 8px; bottom: 8px; width: 190px; height: 228px; cursor: grab; touch-action: none; }
+  .ghost svg { width: 100%; height: 100%; overflow: visible; color: var(--ink); }
+  .sheet { fill: var(--sheet); }
+  .mode { display: none; }
+  body:not(.possessed) .normal, body.possessed .possessed-mode { display: inline; }
+
+  .bubble {
+    position: absolute; top: 8px; right: 8px; max-width: 250px; box-sizing: border-box;
+    border: 2px solid var(--ink); border-radius: 16px; padding: 8px 12px;
+    background: var(--bubble); font-size: 20px; line-height: 1.1; cursor: pointer;
+    opacity: 0; transform: translateY(6px); transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+  }
+  .bubble.shown { opacity: 1; transform: none; pointer-events: auto; }
+
+  /* One possessed pupil drifts on its own. */
+  @keyframes drift { 0% { transform: translate(0, 0); } 25% { transform: translate(4px, -3px); } 50% { transform: translate(-3px, 4px); } 75% { transform: translate(5px, 3px); } 100% { transform: translate(0, 0); } }
+  .drift { animation: drift 3.2s ease-in-out infinite; }
+</style>
+</head>
+<body>
+<div id="bubble" class="bubble" role="status"></div>
+
+<div id="ghost" class="ghost" aria-label="Paperclip ghost">
+  <svg viewBox="0 0 200 240" role="img" aria-label="Doodled sheet ghost with googly eyes">
+    <defs>
+      <filter id="wobNormal"><feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="1"><animate attributeName="seed" values="1;2;3;4" dur="0.6s" repeatCount="indefinite"></animate></feTurbulence><feDisplacementMap in="SourceGraphic" scale="3"></feDisplacementMap></filter>
+      <filter id="wobPossessed"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="1"><animate attributeName="seed" values="1;2;3;4;5" dur="0.4s" repeatCount="indefinite"></animate></feTurbulence><feDisplacementMap in="SourceGraphic" scale="6"></feDisplacementMap></filter>
+    </defs>
+
+    <g class="normal mode" filter="url(#wobNormal)" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path class="sheet" d="M40 220 C40 120 50 40 100 40 C150 40 160 120 160 220 Q147 205 134 220 Q120 235 107 220 Q93 205 80 220 Q66 235 53 220 Q46 212 40 220 Z"></path>
+      <path d="M44 140 Q22 132 18 108"></path>
+      <path d="M156 140 Q180 128 186 106"></path>
+      <path d="M90 150 Q100 158 110 150"></path>
+    </g>
+    <g class="possessed-mode mode" filter="url(#wobPossessed)" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path class="sheet" d="M40 220 C40 120 50 40 100 40 C150 40 160 120 160 220 Q147 205 134 220 Q120 235 107 220 Q93 205 80 220 Q66 235 53 220 Q46 212 40 220 Z"></path>
+      <path d="M44 140 Q36 165 40 188"></path>
+      <path d="M156 140 Q164 165 160 188"></path>
+      <path d="M92 152 L108 152"></path>
+    </g>
+
+    <circle cx="82" cy="112" r="15" fill="#FFFFFF" stroke="currentColor" stroke-width="3"></circle>
+    <circle cx="118" cy="112" r="15" fill="#FFFFFF" stroke="currentColor" stroke-width="3"></circle>
+
+    <g class="normal mode">
+      <circle id="pupilLeft" cx="82" cy="112" r="6.5" fill="currentColor"></circle>
+      <circle id="pupilRight" cx="118" cy="112" r="6.5" fill="currentColor"></circle>
+    </g>
+    <g class="possessed-mode mode">
+      <circle cx="82" cy="112" r="6.5" fill="currentColor"></circle>
+      <g class="drift"><circle cx="118" cy="112" r="6.5" fill="currentColor"></circle></g>
+    </g>
+  </svg>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

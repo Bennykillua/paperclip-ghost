@@ -1,12 +1,15 @@
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { GlanceInput, StatusReport } from './shared.js';
-import { taskQueue, temporalAddress, workflowId } from './shared.js';
+import { askSignalName, taskQueue, temporalAddress, workflowId } from './shared.js';
 
 const connection = await Connection.connect({ address: temporalAddress });
 const client = new Client({ connection });
 const handle = client.workflow.getHandle(workflowId);
 
-if (process.argv.includes('--status')) {
+if (process.argv.includes('--ask')) {
+  await handle.signal(askSignalName);
+  console.log(`Sent ${askSignalName}.`);
+} else if (process.argv.includes('--status')) {
   const status = await handle.query<StatusReport>('status');
   console.log(JSON.stringify(status, null, 2));
 } else {

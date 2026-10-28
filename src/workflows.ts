@@ -1,10 +1,13 @@
-import { ActivityFailure, continueAsNew, defineQuery, log, patched, proxyActivities, setHandler, sleep, uuid4 } from '@temporalio/workflow';
+import { ActivityFailure, continueAsNew, defineQuery, defineSignal, log, patched, proxyActivities, setHandler, sleep, uuid4 } from '@temporalio/workflow';
 import type * as activities from './activities.js';
-import type { GlanceInput, Observation, StatusReport } from './shared.js';
+import { askSignalName, type GlanceInput, type Observation, type StatusReport } from './shared.js';
 
 const tickMs = 5_000;
 const visionEveryMs = 45_000;
 const memoryMs = 30 * 60_000;
+// At most one interruption per 3 minutes. The same kind is repeated only after 15 minutes.
+const interruptionGapMs = 3 * 60_000;
+const repeatMs = 15 * 60_000;
 
 const { readActiveWindow } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10s',
@@ -27,8 +30,14 @@ const { beginGlance, endGlance } = proxyActivities<typeof activities>({
   startToCloseTimeout: '5s',
   retry: { maximumAttempts: 3, initialInterval: '1s' },
 });
+const { showInterruption } = proxyActivities<typeof activities>({
+  startToCloseTimeout: '20s',
+  retry: { maximumAttempts: 2, initialInterval: '1s' },
+});
 
 export const statusQuery = defineQuery<StatusReport>('status');
+// Sent by the "Ask the ghost" trigger. The next glance shows an interruption, subject to the cooldown.
+export const askSignal = defineSignal(askSignalName);
 
 // How many minutes the newest run of observations with the same key has lasted.
 function streakMinutes(observations: Observation[], keyOf: (observation: Observation) => string | null): number {
@@ -67,6 +76,12 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
   let lastVisionAt = input.lastVisionAt;
   let latestVision = input.latestVision;
   let lastDecision = input.lastDecision;
+  let lastShownAt = input.lastShownAt ?? 0;
+  let lastShownKind = input.lastShownKind ?? null;
+  let askRequested = false;
+  setHandler(askSignal, () => {
+    askRequested = true;
+  });
 
   setHandler(statusQuery, (): StatusReport => ({
     generation: input.generation,
@@ -90,6 +105,8 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
         lastVisionAt,
         latestVision,
         lastDecision,
+        lastShownAt,
+        lastShownKind,
       });
     }
 
@@ -132,6 +149,28 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
         log.info(`${decision.kind.toUpperCase()}${decision.message ? ` ${decision.message}` : ''}`);
       }
       lastDecision = decision;
+
+      // Show step. patched() keeps histories recorded before this step existed on the old path.
+      if (patched('ghost-ui')) {
+        const forced = askRequested;
+        askRequested = false;
+        const kind = decision.kind === 'quiet' ? (forced ? 'help' : null) : decision.kind;
+        const changed = kind !== lastShownKind || tickAt - lastShownAt >= repeatMs;
+        if (kind && (forced || changed)) {
+          // "Ask the ghost" bypasses the cooldown. Automatic interruptions respect it.
+          // patched() keeps histories recorded before this bypass on the old path, where a forced ask in the cooldown was skipped.
+          const bypass = forced && patched('ask-bypass');
+          if (!bypass && tickAt - lastShownAt < interruptionGapMs) {
+            log.info('interruption skipped: under the 3 minute cooldown');
+          } else {
+            await showInterruption({ kind, observation: latestVision, sentryTrace, forced: bypass }).catch((error) => {
+              log.warn(`show failed: ${errorMessage(error)}`);
+            });
+            lastShownAt = tickAt;
+            lastShownKind = kind;
+          }
+        }
+      }
     } catch (error) {
       log.warn(`tick failed: ${errorMessage(error)}`);
     }
