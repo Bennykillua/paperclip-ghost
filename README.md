@@ -21,6 +21,10 @@ npm run setup              # checks the tools, asks for a model, builds, starts 
 npm run ghost:test -- all  # see every effect once
 ```
 
+Settings live in `.env`. `.env.example` lists them with notes. Setup writes `VISION_MODEL` for you, and Sentry stays off until you add `SENTRY_DSN`.
+
+The command-line tools are listed in `Brewfile`. `brew bundle` installs them.
+
 Then give macOS the two permissions in [Permissions](#permissions) and run `npm run ghost:start`. The ghost starts on login and comes back if it is killed.
 
 Setup does these steps, asking before each download:
