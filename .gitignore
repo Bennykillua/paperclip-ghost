@@ -3,3 +3,4 @@ dist/
 paperclip.db*
 .env
 .temporal-server.log
+WRITEUP_PACK.md

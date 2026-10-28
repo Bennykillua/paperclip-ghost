@@ -13,18 +13,43 @@ const domain = `gui/${userInfo().uid}`;
 // The electron package exports the path to its binary.
 const electronBinary = createRequire(import.meta.url)('electron');
 
-const agents = [
-  {
-    label: 'com.paperclip.worker',
-    args: [process.execPath, `--env-file-if-exists=${join(projectDir, '.env')}`, join(projectDir, 'dist', 'worker.js')],
-    log: join(logsDir, 'paperclip-worker.log'),
-  },
-  {
-    label: 'com.paperclip.ui',
-    args: [electronBinary, join(projectDir, 'ui')],
-    log: join(logsDir, 'paperclip-ui.log'),
-  },
-];
+// The Temporal CLI is found on PATH. setup installs it if it is missing.
+function temporalBinary() {
+  try {
+    return execFileSync('which', ['temporal'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Order matters: the Temporal server starts first, then the worker and the UI.
+function agents() {
+  const list = [];
+  const temporal = temporalBinary();
+  if (temporal) {
+    list.push({
+      label: 'com.paperclip.temporal',
+      args: [
+        temporal, 'server', 'start-dev', '--headless', '--log-level', 'warn',
+        '--db-filename', join(projectDir, 'paperclip.db'), '--ip', '127.0.0.1',
+      ],
+      log: join(logsDir, 'paperclip-temporal.log'),
+    });
+  }
+  list.push(
+    {
+      label: 'com.paperclip.worker',
+      args: [process.execPath, `--env-file-if-exists=${join(projectDir, '.env')}`, join(projectDir, 'dist', 'worker.js')],
+      log: join(logsDir, 'paperclip-worker.log'),
+    },
+    {
+      label: 'com.paperclip.ui',
+      args: [electronBinary, join(projectDir, 'ui')],
+      log: join(logsDir, 'paperclip-ui.log'),
+    },
+  );
+  return list;
+}
 
 function plist({ label, args, log }) {
   const programArguments = args.map((arg) => `    <string>${arg}</string>`).join('\n');
@@ -94,30 +119,38 @@ function bootstrap(label) {
   }
 }
 
+// Labels for uninstall and stop, which must work even when the Temporal CLI has been removed.
+const allLabels = ['com.paperclip.temporal', 'com.paperclip.worker', 'com.paperclip.ui'];
+
 const command = process.argv[2];
 
 if (command === 'install') {
+  const list = agents();
+  if (!list.some((agent) => agent.label === 'com.paperclip.temporal')) {
+    console.error('Temporal CLI not found on PATH. Install it with: brew install temporal');
+    process.exit(1);
+  }
   await mkdir(agentsDir, { recursive: true });
   await mkdir(logsDir, { recursive: true });
-  for (const agent of agents) {
+  for (const agent of list) {
     await writeFile(plistPath(agent.label), plist(agent));
     unload(agent.label);
     bootstrap(agent.label);
     console.log(`Installed ${agent.label}. Logs: ${agent.log}`);
   }
 } else if (command === 'uninstall') {
-  for (const agent of agents) {
-    unload(agent.label);
-    await rm(plistPath(agent.label), { force: true });
-    console.log(`Uninstalled ${agent.label}.`);
+  for (const label of [...allLabels].reverse()) {
+    unload(label);
+    await rm(plistPath(label), { force: true });
+    console.log(`Uninstalled ${label}.`);
   }
 } else if (command === 'stop') {
-  for (const agent of agents) {
-    unload(agent.label);
-    console.log(`Stopped ${agent.label}.`);
+  for (const label of [...allLabels].reverse()) {
+    unload(label);
+    console.log(`Stopped ${label}.`);
   }
 } else if (command === 'start') {
-  for (const agent of agents) {
+  for (const agent of agents()) {
     if (!existsSync(plistPath(agent.label))) {
       console.error(`${agent.label} is not installed. Run npm run install-worker first.`);
       process.exit(1);

@@ -10,7 +10,8 @@
     "uninstall-worker": "node scripts/launchd.mjs uninstall",
     "ghost:stop": "node scripts/launchd.mjs stop",
     "ghost:start": "node scripts/launchd.mjs start",
-    "ghost:test": "node scripts/ghost-test.mjs"
+    "ghost:test": "node scripts/ghost-test.mjs",
+    "setup": "node scripts/setup.mjs"
   },
   "type": "module",
   "private": "true",

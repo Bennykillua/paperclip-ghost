@@ -12,7 +12,8 @@ import { uiPort, type Decision, type NotableKind, type Vision, type WindowInfo }
 const run = promisify(execFile);
 
 const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const visionModel = 'gemma4:e2b';
+// Chosen during npm run setup and stored in .env. Both the vision and the line calls use it.
+const visionModel = process.env.VISION_MODEL ?? 'gemma4:e2b';
 const visionTimeoutMs = 30_000;
 const maxImageSide = 1280;
 const stuckMinutes = Number(process.env.STUCK_MINUTES ?? 20);
@@ -205,7 +206,7 @@ export interface ShowInput {
   forced: boolean;
 }
 
-const lineModel = 'gemma4:e2b';
+const lineModel = visionModel;
 const lineTimeoutMs = 5_000;
 const maxLineWords = 14;
 
