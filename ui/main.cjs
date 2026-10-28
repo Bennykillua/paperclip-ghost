@@ -20,7 +20,7 @@ const cursorMs = 50;
 const modeMs = 60_000;
 const cooldownMs = 3 * 60_000;
 // "Ask the ghost" steps through each effect in turn. Lightning is only shown in possessed mode.
-const demoSteps = ['line', 'suggest', 'flee', 'splatter', 'lightning'];
+const demoSteps = ['line', 'suggest', 'flee', 'splatter', 'lightning', 'peek', 'shiver', 'candle', 'ink'];
 
 let win = null;
 let tray = null;

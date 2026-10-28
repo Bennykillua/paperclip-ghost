@@ -5,6 +5,7 @@ const bubble = document.getElementById('bubble');
 const pupilLeft = document.getElementById('pupilLeft');
 const pupilRight = document.getElementById('pupilRight');
 const flash = document.getElementById('flash');
+const candle = document.getElementById('candle');
 const canvas = document.getElementById('splatter');
 const context = canvas.getContext('2d');
 
@@ -34,6 +35,8 @@ let near = false;
 let busy = false; // splattering or reforming
 let dragging = null;
 let particles = [];
+let trail = []; // ink trail dots, left behind by the ink effect
+let tween = null; // a timed glide, used by peek and ink
 let hoverOver = false;
 let flashedThisSession = false;
 let hideTimer = null;
@@ -172,8 +175,16 @@ function reform() {
 
 function drawParticles() {
   context.clearRect(0, 0, width, height);
-  particles = particles.filter((p) => p.life > 0);
+  trail = trail.filter((dot) => dot.life > 0);
   context.fillStyle = '#8E1B14';
+  for (const dot of trail) {
+    dot.life -= 0.012;
+    context.globalAlpha = Math.max(0, dot.life) * 0.7;
+    context.beginPath();
+    context.arc(dot.x, dot.y, dot.size, 0, Math.PI * 2);
+    context.fill();
+  }
+  particles = particles.filter((p) => p.life > 0);
   for (const p of particles) {
     p.x += p.vx;
     p.y += p.vy;
@@ -186,6 +197,75 @@ function drawParticles() {
     context.fill();
   }
   context.globalAlpha = 1;
+}
+
+// Glide the ghost to a point over a set time. keepBusy holds the ghost still after the glide, for a later step.
+function glide(to, duration, options = {}) {
+  busy = true;
+  tween = {
+    from: { ...pos },
+    to,
+    start: performance.now(),
+    duration,
+    keepBusy: options.keepBusy ?? false,
+    leaveTrail: options.leaveTrail ?? false,
+    onDone: options.onDone,
+  };
+}
+
+function stepTween(now) {
+  if (!tween) return;
+  const t = Math.min(1, (now - tween.start) / tween.duration);
+  const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2; // ease in and out
+  pos = {
+    x: tween.from.x + (tween.to.x - tween.from.x) * eased,
+    y: tween.from.y + (tween.to.y - tween.from.y) * eased,
+  };
+  if (tween.leaveTrail) {
+    const c = centre();
+    trail.push({ x: c.x, y: c.y, life: 1, size: 3 + Math.random() * 3 });
+  }
+  if (t >= 1) {
+    const done = tween;
+    tween = null;
+    if (!done.keepBusy) busy = false;
+    done.onDone?.();
+  }
+}
+
+// Peek: the ghost slides in from the nearest edge, hangs there, then slides back.
+function peek() {
+  const home = { ...pos };
+  const out = pos.x + ghostWidth / 2 < width / 2
+    ? { x: -ghostWidth * 0.7, y: home.y }
+    : { x: width - ghostWidth * 0.3, y: home.y };
+  glide(out, 700, {
+    keepBusy: true,
+    onDone: () => setTimeout(() => glide(home, 700), 1200),
+  });
+}
+
+// Shiver: a quick jitter for about a second.
+function shiver() {
+  ghost.classList.add('shiver');
+  setTimeout(() => ghost.classList.remove('shiver'), 900);
+}
+
+// Candle: one warm flicker along the bottom of the screen.
+function candleFlicker() {
+  candle.classList.remove('on');
+  void candle.offsetWidth;
+  candle.classList.add('on');
+}
+
+// Ink: the ghost glides across the screen and leaves a red trail.
+function ink() {
+  const c = centre();
+  const to = clampToScreen({
+    x: c.x < width / 2 ? width - ghostWidth - 40 : 40,
+    y: 60 + Math.random() * Math.max(0, height - ghostHeight - 120),
+  });
+  glide(to, 1800, { leaveTrail: true });
 }
 
 // One soft flash, then thunder synthesized with Web Audio. No audio files.
@@ -269,7 +349,8 @@ ghost.addEventListener('pointerup', (event) => {
   ghost.releasePointerCapture(event.pointerId);
 });
 
-function frame() {
+function frame(now) {
+  stepTween(now);
   stepBehaviour();
   easeTowardTarget();
   drawParticles();
@@ -305,6 +386,14 @@ api.onDemo(({ effect }) => {
     if (!busy) splatter();
   } else if (effect === 'lightning') {
     lightning();
+  } else if (effect === 'peek') {
+    if (!busy) peek();
+  } else if (effect === 'shiver') {
+    shiver();
+  } else if (effect === 'candle') {
+    candleFlicker();
+  } else if (effect === 'ink') {
+    if (!busy) ink();
   }
 });
 

@@ -8,8 +8,10 @@ const memoryMs = 30 * 60_000;
 // At most one interruption per 3 minutes. The same kind is repeated only after 15 minutes.
 const interruptionGapMs = 3 * 60_000;
 const repeatMs = 15 * 60_000;
-// Unprompted suggestions: at most one every 12 minutes, and only when the latest observation has a notable item.
-const suggestGapMs = 12 * 60_000;
+// Unprompted suggestions: at most one every 3 minutes, and only when the latest observation has a notable item.
+// Histories recorded before the change keep the old 12 minute gap, via patched().
+const suggestGapMs = 3 * 60_000;
+const oldSuggestGapMs = 12 * 60_000;
 
 const { readActiveWindow } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10s',
@@ -189,9 +191,10 @@ export async function glanceLoop(input: GlanceInput): Promise<void> {
         }
 
         // Unprompted suggestion. patched() keeps the old behaviour for histories recorded before suggestions existed.
+        const suggestGap = patched('suggestions-3min') ? suggestGapMs : oldSuggestGapMs;
         if (
           !shown && !forced && patched('suggestions') && latestVision?.notable
-          && tickAt - lastSuggestAt >= suggestGapMs && tickAt - lastShownAt >= interruptionGapMs
+          && tickAt - lastSuggestAt >= suggestGap && tickAt - lastShownAt >= interruptionGapMs
         ) {
           await show('suggest', false);
           lastSuggestAt = tickAt;

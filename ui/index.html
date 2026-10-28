@@ -37,6 +37,16 @@
   #flash.on { animation: flashPulse 1.6s ease-out 1 forwards; }
   @keyframes flashPulse { 0% { opacity: 0; } 12% { opacity: 0.55; } 100% { opacity: 0; } }
 
+  /* One warm candle flicker along the bottom of the screen. */
+  #candle { position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at 50% 100%, rgba(255, 176, 90, 0.45), rgba(255, 140, 60, 0) 65%); }
+  #candle.on { animation: candleFlicker 2.4s ease-out 1 forwards; }
+  @keyframes candleFlicker { 0% { opacity: 0; } 8% { opacity: 0.8; } 16% { opacity: 0.35; } 26% { opacity: 0.7; } 38% { opacity: 0.25; } 52% { opacity: 0.6; } 70% { opacity: 0.2; } 100% { opacity: 0; } }
+
+  /* Shiver: a quick jitter. */
+  .ghost.shiver { animation: shiver 0.09s linear infinite; }
+  @keyframes shiver { 0% { transform: translate(0, 0); } 25% { transform: translate(-2px, 1px); } 50% { transform: translate(2px, -1px); } 75% { transform: translate(-1px, -2px); } 100% { transform: translate(1px, 2px); } }
+
   /* One possessed pupil drifts on its own. */
   @keyframes drift { 0% { transform: translate(0, 0); } 25% { transform: translate(4px, -3px); } 50% { transform: translate(-3px, 4px); } 75% { transform: translate(5px, 3px); } 100% { transform: translate(0, 0); } }
   .drift { animation: drift 3.2s ease-in-out infinite; }
@@ -45,6 +55,7 @@
 <body>
 <canvas id="splatter"></canvas>
 <div id="flash"></div>
+<div id="candle"></div>
 <div id="bubble" class="bubble" role="status"></div>
 
 <div id="ghost" class="ghost" aria-label="Paperclip ghost">

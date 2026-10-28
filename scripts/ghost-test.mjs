@@ -7,14 +7,18 @@ const temporalAddress = '127.0.0.1:7233';
 const workflowId = 'paperclip-glance';
 const askSignal = 'askGhost';
 
-const effects = ['flee', 'splatter', 'lightning'];
+const effects = ['flee', 'splatter', 'lightning', 'peek', 'shiver', 'candle', 'ink'];
 const workerModes = ['line', 'suggest'];
 const usage = `Usage: npm run ghost:test -- <command>
   line                 worker writes a line about the latest observation (bypasses cooldown)
   suggest              worker writes an unprompted-style suggestion about the latest notable item
   flee                 ghost flees the cursor
   splatter             red ink splatter and reform
-  lightning            one soft flash with thunder (possessed mode only)
+  lightning            one soft flash with thunder
+  peek                 ghost slides in from the nearest edge, hangs there, then slides back
+  shiver               ghost trembles for about a second
+  candle               one warm candle flicker along the bottom of the screen
+  ink                  ghost glides across the screen and leaves a red ink trail
   message "<text>"     show your own text in the bubble
   all                  run every effect in turn, with a pause between them`;
 
